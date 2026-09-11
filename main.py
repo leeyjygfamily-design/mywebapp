@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-import geojson
+import json
 import plotly.express as px
 
 # 1. 스트림릿 페이지 기본 설정
@@ -18,10 +18,10 @@ st.caption("2015~2026년 인구 데이터 중 가장 최신 연도를 기준으�
 # 2. 데이터 불러오기 함수 (캐싱 적용으로 속도 향상)
 @st.cache_data
 def load_data():
-    # --- A. GeoJSON 경계 데이터 불러오기 ---
+    # --- A. GeoJSON 경계 데이터 불러오기 (json 내장 모듈 사용) ---
     boundary_url = "https://raw.githubusercontent.com/greatsong/modudata/main/data/boundaries/sigungu_kr.geojson"
     response = requests.get(boundary_url)
-    geojson_data = geojson.loads(response.text)
+    geojson_data = json.loads(response.text)
 
     # --- B. 인구 데이터 불러오기 및 전처리 ---
     pop_url = "https://raw.githubusercontent.com/greatsong/modudata/main/data/population_yearly.csv.gz"
@@ -51,14 +51,13 @@ def load_data():
             old_age_cols.append(col)
             
     # 시군구별로 전체 인구 및 65세 이상 인구 합산
-    # 만약 '계_전체' 열이 없다면 모든 '계_' 열의 합을 전체 인구로 사용
     if not total_pop_col:
         df_latest['전체인구_임시'] = df_latest[age_cols].sum(axis=1)
         total_pop_col = '전체인구_임시'
 
     df_latest['65세이상인구'] = df_latest[old_age_cols].sum(axis=1)
     
-    # 시군구 코드로 그룹화하여 합계 계산 (시도, 시군구 이름도 함께 유지)
+    # 시군구 코드로 그룹화하여 합계 계산
     grouped = df_latest.groupby('시군구코드').agg({
         '시도': 'first',
         '시군구': 'first',
@@ -72,7 +71,7 @@ def load_data():
     grouped['고령화율'] = (grouped['65세이상인구'] / grouped['총인구수']) * 100
     grouped['고령화율'] = grouped['고령화율'].round(2)
     
-    # --- C. 요청받은 5단계 데이터 범주화 (19%, 23%, 28%, 38%) ---
+    # --- C. 5단계 데이터 범주화 (19%, 23%, 28%, 38%) ---
     bins = [-np.inf, 19, 23, 28, 38, np.inf]
     labels = ['19% 미만', '19% 이상 ~ 23% 미만', '23% 이상 ~ 28% 미만', '28% 이상 ~ 38% 미만', '38% 이상']
     
@@ -86,8 +85,7 @@ with st.spinner("인구 데이터 및 지도 데이터를 불러오는 중입니
 
 st.subheader(f"📅 기준 연도: {latest_year}년")
 
-# 3. Plotly를 활용한 Choropleth(단계구분도) 지도 작성
-# 지정된 5단계 구간에 맞춘 색상 매핑 (연한 색 -> 진한 색)
+# 3. Plotly를 활용한 Choropleth 지도 작성
 color_discrete_map = {
     '19% 미만': '#fef0d9',
     '19% 이상 ~ 23% 미만': '#fdcc8a',
@@ -99,9 +97,9 @@ color_discrete_map = {
 fig = px.choropleth_mapbox(
     df_sigungu,
     geojson=geojson_data,
-    locations='시군구코드',        # 데이터의 연결 키
-    featureidkey='properties.코드', # GeoJSON의 연결 키
-    color='고령화율_구간',         # 색상 기준 (범주형)
+    locations='시군구코드',
+    featureidkey='properties.코드',
+    color='고령화율_구간',
     color_discrete_map=color_discrete_map,
     category_orders={'고령화율_구간': ['19% 미만', '19% 이상 ~ 23% 미만', '23% 이상 ~ 28% 미만', '28% 이상 ~ 38% 미만', '38% 이상']},
     hover_name='시군구',
@@ -111,9 +109,9 @@ fig = px.choropleth_mapbox(
         '고령화율': ':.2f',
         '고령화율_구간': False
     },
-    center={"lat": 35.8, "lon": 127.8}, # 대한민국 중심 위치
+    center={"lat": 35.8, "lon": 127.8},
     zoom=6.2,
-    mapbox_style="white-bg",            # 배경 지도 타일 제거
+    mapbox_style="white-bg",
     labels={
         '고령화율_구간': '고령화율 구간',
         '고령화율': '고령화율(%)',
@@ -121,7 +119,6 @@ fig = px.choropleth_mapbox(
     }
 )
 
-# 지도 레이아웃 마감 및 여백 설정
 fig.update_layout(
     margin={"r": 0, "t": 10, "l": 0, "b": 0},
     legend=dict(
@@ -132,7 +129,6 @@ fig.update_layout(
     )
 )
 
-# 화면에 지도 출력
 st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
@@ -140,7 +136,6 @@ st.markdown("---")
 # 4. 고령화율 상위/하위 10개 지역 표 출력
 col1, col2 = st.columns(2)
 
-# 고령화율 높음 Top 10
 with col1:
     st.subheader("🔴 고령화율 가장 높은 지역 TOP 10")
     top10 = df_sigungu.sort_values(by='고령화율', ascending=False).head(10)
@@ -151,7 +146,6 @@ with col1:
         use_container_width=True
     )
 
-# 고령화율 낮음 Top 10
 with col2:
     st.subheader("🔵 고령화율 가장 낮은 지역 TOP 10")
     bottom10 = df_sigungu.sort_values(by='고령화율', ascending=True).head(10)
